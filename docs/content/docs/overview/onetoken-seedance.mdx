@@ -1,0 +1,70 @@
+---
+title: OneToken Seedance 2.0
+description: 在无限画布中通过 OneToken 公共 API 使用 Seedance 2.0
+---
+
+# OneToken Seedance 2.0
+
+OneToken 公开版无限画布内置 `OneToken Seedance 2.0` 调用脚本。浏览器只请求 OneToken 公共 API，用户不需要配置或了解 OneToken 内部的服务来源与路由。
+
+> API Key 保存在当前浏览器本地。请只在自己的设备和可信部署中使用，不要公开带有真实 API Key 的配置导出文件。
+
+## 准备信息
+
+在 [OneToken 控制台](https://app.onetoken.love/dashboard/keys) 创建 API Key，然后使用以下固定配置：
+
+```text
+Base URL  https://api.onetoken.love/api/v3
+Model     doubao-seedance-2-0-260128
+Template  OneToken Seedance 2.0
+```
+
+## 配置步骤
+
+1. 打开无限画布右上角「配置」。
+2. 新建渠道，名称填写 `OneToken`。
+3. Base URL 填写 `https://api.onetoken.love/api/v3`。
+4. API Key 填写 OneToken 控制台创建的密钥。
+5. 添加模型 `doubao-seedance-2-0-260128`，能力选择「视频」。
+6. 打开模型的「调用脚本」，选择 `OneToken Seedance 2.0` 并保存。
+7. 回到画布或视频工作台，选择该模型后开始生成。
+
+## 支持的输入
+
+| 输入     | 用法                                      |
+| -------- | ----------------------------------------- |
+| 文本     | 输入提示词直接生成视频                    |
+| 参考图片 | 最多 9 张，用于约束角色、风格和画面       |
+| 参考视频 | 最多 3 段，用于动作、镜头或内容参考       |
+| 参考音频 | 最多 3 段，需要同时包含参考图片或参考视频 |
+
+可设置时长、分辨率、画面比例、生成声音和水印。客户端会先创建异步任务，再每 5 秒查询状态；完成后自动把视频放回画布。任务最长等待 15 分钟。
+
+## 接口形式
+
+脚本使用下面两个 OneToken 接口：
+
+```text
+POST https://api.onetoken.love/api/v3/contents/generations/tasks
+GET  https://api.onetoken.love/api/v3/contents/generations/tasks/{id}
+```
+
+创建任务时会自动生成唯一 `Idempotency-Key`，避免同一次点击重复创建任务。网络超时并不等于任务未创建，请先查询原任务，不要立即重复提交。
+
+## 常见问题
+
+### HTTP 401
+
+OneToken API Key 无效、已撤销或复制时带入了空格。请在控制台重新创建密钥。
+
+### HTTP 402
+
+OneToken 账户可用额度不足。充值后重新创建任务，原失败任务不会自动续跑。
+
+### HTTP 422
+
+模型名、时长、分辨率或参考素材不符合要求。先使用 `5 秒 + 720p + 纯文本` 验证，再逐步增加参考素材。
+
+### 一直生成中
+
+视频通常需要数分钟。客户端会持续查询 15 分钟；超过时间后，请保留任务 ID 并在 OneToken 控制台检查，不要反复点击生成。

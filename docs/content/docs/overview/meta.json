@@ -4,6 +4,7 @@
   "defaultOpen": true,
   "pages": [
     "quick-start",
+    "onetoken-seedance",
     "codex-app-plugin",
     "features",
     "render",

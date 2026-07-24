@@ -3,6 +3,7 @@
 ## 项目介绍
 
 - [快速开始](/docs/overview/quick-start)
+- [OneToken Seedance 2.0](/docs/overview/onetoken-seedance)
 - [功能介绍](/docs/overview/features)
 - [Render 部署](/docs/overview/render)
 - [Docker 部署](/docs/overview/docker)
@@ -38,7 +39,7 @@
 ## 说明
 
 - 当前画布项目和“我的素材”主要保存在浏览器本地，跨设备可自行配置 WebDAV 同步。
-- AI API Key 保存在浏览器本地，并由前端直接请求 OpenAI 兼容接口。
+- AI API Key 保存在浏览器本地；OneToken 公开版的 Seedance 请求统一发送到 OneToken 公共 API。
 
 ## 原理说明
 

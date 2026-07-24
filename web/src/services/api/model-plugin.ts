@@ -24,6 +24,8 @@ export type RunPluginArgs = {
     config: AiConfig;
     prompt?: string;
     images?: string[];
+    videos?: string[];
+    audios?: string[];
     messages?: unknown[];
     params?: Record<string, unknown>;
     signal?: AbortSignal;
@@ -105,7 +107,7 @@ function createPoll(signal?: AbortSignal) {
 
 /**
  * Run a user-authored model call script as an async function body with flat locals (see PLUGIN_VARIABLES):
- *   prompt / images / messages / params        —— 本次请求的输入
+ *   prompt / images / videos / audios / messages / params        —— 本次请求的输入
  *   model / baseUrl / apiKey / systemPrompt     —— 当前渠道信息
  *   http / request / poll / sleep / signal / onDelta    —— 调用辅助
  * The script must `return` the result; each caller normalizes it to its capability's shape.
@@ -118,6 +120,8 @@ export async function runModelPlugin<T = unknown>(args: RunPluginArgs): Promise<
     const runner = new Function(
         "prompt",
         "images",
+        "videos",
+        "audios",
         "messages",
         "params",
         "model",
@@ -136,6 +140,8 @@ export async function runModelPlugin<T = unknown>(args: RunPluginArgs): Promise<
         return await runner(
             args.prompt || "",
             args.images || [],
+            args.videos || [],
+            args.audios || [],
             args.messages || [],
             args.params || {},
             config.model,
@@ -163,6 +169,8 @@ export type PluginVariable = { name: string; type: string; desc: string; capabil
 export const PLUGIN_VARIABLES: PluginVariable[] = [
     { name: "prompt", type: "string", desc: "用户输入的提示词（已拼接系统提示词）", capabilities: ["image", "video", "audio"] },
     { name: "images", type: "string[]", desc: "参考图，dataURL 数组（改图 / 图生视频时有值）", capabilities: ["image", "video"] },
+    { name: "videos", type: "string[]", desc: "参考视频，公网 URL、asset:// URL 或 dataURL 数组", capabilities: ["video"] },
+    { name: "audios", type: "string[]", desc: "参考音频，公网 URL、asset:// URL 或 dataURL 数组", capabilities: ["video"] },
     { name: "messages", type: "{ role, content }[]", desc: "对话消息数组，含系统消息", capabilities: ["text"] },
     { name: "params", type: "object", desc: "生成参数：生图 {size,quality,count}、视频 {seconds,size,resolution,ratio,generateAudio,watermark}、音频 {voice,format,speed,instructions}" },
     { name: "model", type: "string", desc: "模型名称（不含渠道前缀）" },
@@ -243,6 +251,76 @@ return (data.candidates || [])
         },
     ],
     video: [
+        {
+            label: "OneToken Seedance 2.0",
+            script: `// OneToken Seedance 2.0：支持文本、图片、视频和音频参考。
+// Base URL 固定使用：https://api.onetoken.love/api/v3
+// 可用：prompt、images(dataURL[])、videos(URL/dataURL[])、audios(URL/dataURL[])、
+// params{seconds,resolution,ratio,generateAudio,watermark}、model、baseUrl、apiKey
+const root = baseUrl.replace(/\\/+$/, "");
+const endpoint = /\\/contents\\/generations\\/tasks$/i.test(root) ? root : \`\${root}/contents/generations/tasks\`;
+const requestId = globalThis.crypto?.randomUUID?.() || \`canvas-\${Date.now()}-\${Math.random().toString(16).slice(2)}\`;
+const headers = {
+  "Content-Type": "application/json",
+  Authorization: \`Bearer \${apiKey}\`,
+  "Idempotency-Key": requestId,
+};
+const requestedSeconds = Math.floor(Number(params.seconds));
+const duration = requestedSeconds >= 4 && requestedSeconds <= 15 ? requestedSeconds : 5;
+const text = prompt.trim() || "请根据参考素材生成自然连贯的视频";
+
+if (audios.length > 0 && images.length === 0 && videos.length === 0) {
+  throw new Error("Seedance 参考音频不能单独使用，请同时添加参考图片或参考视频");
+}
+
+const content = [
+  { type: "text", text },
+  ...images.map((url) => ({ type: "image_url", role: "reference_image", image_url: { url } })),
+  ...videos.map((url) => ({ type: "video_url", role: "reference_video", video_url: { url } })),
+  ...audios.map((url) => ({ type: "audio_url", role: "reference_audio", audio_url: { url } })),
+];
+const createdResponse = await request({
+  method: "post",
+  url: endpoint,
+  headers,
+  data: {
+    model,
+    content,
+    resolution: params.resolution || "720p",
+    ratio: params.ratio || "adaptive",
+    duration,
+    generate_audio: params.generateAudio !== false,
+    watermark: params.watermark === true,
+  },
+});
+const created = createdResponse?.data && typeof createdResponse.data === "object" ? createdResponse.data : createdResponse;
+const taskId = created?.id || created?.task_id;
+if (!taskId) throw new Error("OneToken 没有返回视频任务 ID");
+
+return await poll(
+  async () => {
+    const stateResponse = await request({
+      method: "get",
+      url: \`\${endpoint}/\${encodeURIComponent(taskId)}\`,
+      headers: { Authorization: \`Bearer \${apiKey}\` },
+    });
+    const state = stateResponse?.data && typeof stateResponse.data === "object" ? stateResponse.data : stateResponse;
+    const status = String(state?.status || "").toLowerCase();
+    if (["failed", "rejected", "cancelled", "canceled", "expired"].includes(status)) {
+      const detail = state?.error?.message || state?.message || state?.error;
+      throw new Error(typeof detail === "string" && detail ? detail : \`OneToken 视频任务\${status || "失败"}\`);
+    }
+    const url = state?.video_url || state?.result_url || state?.url || state?.content?.video_url || state?.content?.url || state?.output?.video_url || state?.output?.url;
+    if (url) return { url };
+    if (["completed", "succeeded", "success"].includes(status)) {
+      throw new Error("OneToken 任务成功但没有返回视频地址");
+    }
+    return null;
+  },
+  (result) => result,
+  { intervalMs: 5000, timeoutMs: 900000 },
+);`,
+        },
         {
             label: "OpenAI 规范",
             script: `// 视频（脚本内部自行轮询）。可用：prompt、images(dataURL[])、params{seconds,size,resolution,ratio}

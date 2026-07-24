@@ -60,7 +60,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const script = resolveModelScript(config, selectedModel);
-    if (script) return createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
+    if (script) return createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, videoReferences, audioReferences, options);
     assertVideoConfig(requestConfig, requestConfig.model);
     if (isSeedanceVideoConfig(requestConfig)) {
         return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
@@ -81,10 +81,29 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     return task.provider === "seedance" ? pollSeedanceTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
 }
 
-async function createPluginVideoTask(config: AiConfig, model: string, script: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
+async function createPluginVideoTask(
+    config: AiConfig,
+    model: string,
+    script: string,
+    prompt: string,
+    references: ReferenceImage[],
+    videoReferences: ReferenceVideo[],
+    audioReferences: ReferenceAudio[],
+    options?: RequestOptions,
+): Promise<VideoGenerationTask> {
     if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
     if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
+    const seedance = isSeedanceVideoConfig(config);
+    if (seedance) {
+        if (audioReferences.length && !references.length && !videoReferences.length) {
+            throw new Error("Seedance 参考音频不能单独使用，请同时添加参考图或参考视频");
+        }
+        assertSeedanceVideoReferences(videoReferences);
+        assertSeedanceAudioReferences(audioReferences);
+    }
     const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
+    const videoRefs = await Promise.all(videoReferences.map((video) => resolveSeedanceVideoUrl(video)));
+    const audioRefs = await Promise.all(audioReferences.map((audio) => resolveSeedanceAudioUrl(audio)));
     const result = videoPluginResult(
         await runModelPlugin({
             capability: "video",
@@ -92,11 +111,13 @@ async function createPluginVideoTask(config: AiConfig, model: string, script: st
             config,
             prompt,
             images: refs,
+            videos: videoRefs,
+            audios: audioRefs,
             params: {
-                seconds: normalizeVideoSeconds(config.videoSeconds),
+                seconds: seedance ? normalizeSeedanceDuration(config.videoSeconds) : normalizeVideoSeconds(config.videoSeconds),
                 size: normalizeVideoSize(config.size),
-                resolution: normalizeVideoResolution(config.vquality),
-                ratio: config.size,
+                resolution: seedance ? normalizeSeedanceResolution(config.vquality, modelOptionName(model)) : normalizeVideoResolution(config.vquality),
+                ratio: seedance ? normalizeSeedanceRatio(config.size) : config.size,
                 generateAudio: boolConfig(config.videoGenerateAudio, true),
                 watermark: boolConfig(config.videoWatermark, false),
             },

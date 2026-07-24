@@ -58,6 +58,7 @@
 
 ## 文档规范
 
+- OneToken 公开版本的代码、文档、示例和发布说明只描述如何接入 OneToken 公共 API；上游供应商名称、直连地址、专用协议、账号信息和路由实现属于内部信息，不得出现在公开仓库或官网。
 - README 保持简洁，只放项目介绍、核心功能、快速开始和文档入口。
 - `docs/index.md` 放给 AI 使用的文档索引，不要再放到 `docs/content/docs/` 内容目录里。
 - 详细功能介绍写到 `docs/content/docs/overview/features.mdx`。
