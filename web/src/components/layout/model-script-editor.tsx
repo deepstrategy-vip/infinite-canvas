@@ -29,7 +29,7 @@ export function ModelScriptEditor({ open, capability, modelName, value, onSave, 
                         {capabilityLabels[capability]}
                         {modelName ? ` - ${modelName}` : ""}
                     </div>
-                    <div className="mt-1 text-xs font-normal text-stone-500">脚本是一段异步函数体，直接使用下方变量，最后 return 结果；留空则使用系统默认调用。</div>
+                    <div className="mt-1 text-xs font-normal text-stone-500">脚本是一段 OneToken 异步调用函数体，直接使用下方变量，最后 return 结果；留空则使用系统默认调用。</div>
                 </div>
             }
             width={1080}

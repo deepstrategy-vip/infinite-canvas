@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchChannelModels } from "@/services/api/image";
 import type { ModelChannel } from "@/stores/use-config-store";
 
-// 选择渠道模型弹窗：拉取上游模型列表或手动增加，勾选后才会进入渠道模型列表。
+// 选择 OneToken 模型弹窗：读取模型列表或手动增加，勾选后才会进入当前连接。
 export function ModelSelectModal({ open, channel, selectedNames, onConfirm, onClose }: { open: boolean; channel: ModelChannel | null; selectedNames: string[]; onConfirm: (names: string[]) => void; onClose: () => void }) {
     const { message } = App.useApp();
     const [existing, setExisting] = useState<string[]>([]);
@@ -90,7 +90,10 @@ export function ModelSelectModal({ open, channel, selectedNames, onConfirm, onCl
             onCancel={onClose}
             title={
                 <span>
-                    选择渠道模型 <span className="ml-2 text-xs font-normal text-stone-500">已选择 {selected.size} / {new Set([...existing, ...fetched]).size}</span>
+                    选择 OneToken 模型{" "}
+                    <span className="ml-2 text-xs font-normal text-stone-500">
+                        已选择 {selected.size} / {new Set([...existing, ...fetched]).size}
+                    </span>
                 </span>
             }
             styles={{ body: { maxHeight: "62vh", overflowY: "auto" } }}
@@ -111,7 +114,7 @@ export function ModelSelectModal({ open, channel, selectedNames, onConfirm, onCl
                     拉取模型列表
                 </Button>
             </div>
-            <div className="mt-2 text-xs text-stone-500">如果上游不提供 OpenAI /models 模型列表接口，请在这里手动增加模型名称。</div>
+            <div className="mt-2 text-xs text-stone-500">如果当前 OneToken 密钥未返回目标模型，请先确认密钥权限；也可按文档手动增加已授权的模型名称。</div>
 
             <Tabs
                 className="mt-3"
@@ -124,7 +127,9 @@ export function ModelSelectModal({ open, channel, selectedNames, onConfirm, onCl
             />
 
             <div className="mb-3 flex items-center justify-between gap-2">
-                <span className="text-xs text-stone-500">当前列表已选择 {visibleSelectedCount} / {visibleList.length}</span>
+                <span className="text-xs text-stone-500">
+                    当前列表已选择 {visibleSelectedCount} / {visibleList.length}
+                </span>
                 <div className="flex gap-2">
                     <Button size="small" disabled={!visibleList.length} onClick={() => selectVisible(true)}>
                         全选当前列表
@@ -146,7 +151,7 @@ export function ModelSelectModal({ open, channel, selectedNames, onConfirm, onCl
                     ))}
                 </div>
             ) : (
-                <div className="py-8 text-center text-sm text-stone-500">{activeTab === "new" ? "点击「拉取模型列表」获取上游模型，或手动增加模型名称。" : "暂无已选择的模型。"}</div>
+                <div className="py-8 text-center text-sm text-stone-500">{activeTab === "new" ? "点击「拉取模型列表」读取 OneToken 当前可用模型，或手动增加已授权模型名称。" : "暂无已选择的模型。"}</div>
             )}
         </Modal>
     );

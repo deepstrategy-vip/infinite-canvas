@@ -70,7 +70,7 @@ docker compose up -d --build
 
 运行后默认端口3000，可访问 `http://localhost:3000`。
 
-首次打开后进入右上角配置，填入 OneToken `Base URL`（`https://api.onetoken.love/api/v3`）和自己的 OneToken `API Key`，再为视频模型选择 `OneToken Seedance 2.0` 调用脚本。
+首次打开后进入右上角配置，填入 OneToken 根地址 `https://api.onetoken.love` 和自己的 OneToken `API Key`。程序会为文本、图片和音频请求使用 `/v1`，为 Gemini 原生格式使用 `/v1beta`，为 Seedance 2.0 异步视频使用 `/api/v3`；不要在新连接的 Base URL 中固定某一个版本路径。视频模型选择 `OneToken Seedance 2.0` 调用脚本。
 
 ## 效果展示
 

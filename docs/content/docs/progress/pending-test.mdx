@@ -5,7 +5,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
-- OneToken Seedance 2.0：在模型渠道中添加 `doubao-seedance-2-0-260128`，Base URL 使用 `https://api.onetoken.love/api/v3`，选择 `OneToken Seedance 2.0` 调用脚本后，分别验证文生视频、单图生视频和图片+视频+音频混合参考；任务应自动创建、轮询并把结果放回画布。
+- OneToken API 路径：新建连接时 Base URL 使用 `https://api.onetoken.love`，分别验证模型列表、文本、图片和音频请求走 `/v1`，OneToken Gemini 原生模板走 `/v1beta`，Seedance 2.0 走 `/api/v3`；旧的 `/api/v3` 配置升级后仍应可用。
+- OneToken Seedance 2.0：添加 `doubao-seedance-2-0-260128`，选择 `OneToken Seedance 2.0` 调用脚本后，分别验证文生视频、单图生视频和图片+视频+音频混合参考；任务应自动创建、轮询并把结果放回画布。
 
 - 提示词来源：6 个内置来源应从 Image Prompts 统一仓库读取，更新后数量依次为 323、494、53、76、126、129；提示词仍按 6 个来源分组并可独立启用，来源内可继续按 `tags` 筛选。添加标准 JSON URL 后应能查看内容，填写非数组 JSON 或不可访问地址时应显示失败，并继续保留该来源上一次成功缓存的内容。
 - 提示词来源界面：来源应以卡片列表展示，启用开关位于左侧，数量、同步状态和上次成功时间作为次级信息显示，查看、拉取及自定义来源编辑/删除操作使用带文字按钮；底部定时拉取区域应保持独立边框布局。

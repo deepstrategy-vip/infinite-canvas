@@ -14,16 +14,26 @@ OneToken 公开版无限画布内置 `OneToken Seedance 2.0` 调用脚本。浏�
 在 [OneToken 控制台](https://app.onetoken.love/dashboard/keys) 创建 API Key，然后使用以下固定配置：
 
 ```text
-Base URL  https://api.onetoken.love/api/v3
+Base URL  https://api.onetoken.love
 Model     doubao-seedance-2-0-260128
 Template  OneToken Seedance 2.0
 ```
 
+只填写 OneToken 根地址。无限画布会根据能力自动选择接口版本：
+
+| 能力                       | 实际接口前缀 |
+| -------------------------- | ------------ |
+| 文本、图片、音频和模型列表 | `/v1`        |
+| OneToken Gemini 原生格式   | `/v1beta`    |
+| Seedance 2.0 异步视频      | `/api/v3`    |
+
+旧版本中已经保存的 `https://api.onetoken.love/api/v3` 仍然兼容；新连接建议统一改为根地址，避免文本、图片或音频请求走错路径。
+
 ## 配置步骤
 
 1. 打开无限画布右上角「配置」。
-2. 新建渠道，名称填写 `OneToken`。
-3. Base URL 填写 `https://api.onetoken.love/api/v3`。
+2. 新建 OneToken 连接，名称填写 `OneToken`。
+3. Base URL 填写 `https://api.onetoken.love`。
 4. API Key 填写 OneToken 控制台创建的密钥。
 5. 添加模型 `doubao-seedance-2-0-260128`，能力选择「视频」。
 6. 打开模型的「调用脚本」，选择 `OneToken Seedance 2.0` 并保存。
@@ -40,16 +50,95 @@ Template  OneToken Seedance 2.0
 
 可设置时长、分辨率、画面比例、生成声音和水印。客户端会先创建异步任务，再每 5 秒查询状态；完成后自动把视频放回画布。任务最长等待 15 分钟。
 
-## 接口形式
+## 直接调用 API
 
-脚本使用下面两个 OneToken 接口：
+创建任务必须使用唯一 `Idempotency-Key`。推荐让程序为每次新请求生成 UUID；下面的命令使用时间戳和随机值：
 
-```text
-POST https://api.onetoken.love/api/v3/contents/generations/tasks
-GET  https://api.onetoken.love/api/v3/contents/generations/tasks/{id}
+```bash
+REQUEST_ID="video-$(date +%s)-$(openssl rand -hex 8)"
+
+curl "https://api.onetoken.love/api/v3/contents/generations/tasks" \
+  -H "Authorization: Bearer YOUR_ONETOKEN_API_KEY" \
+  -H "Idempotency-Key: ${REQUEST_ID}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "doubao-seedance-2-0-260128",
+    "content": [
+      {
+        "type": "text",
+        "text": "A cinematic sunrise over a quiet lake"
+      }
+    ],
+    "resolution": "720p",
+    "duration": 5,
+    "fps": 24
+  }'
 ```
 
-创建任务时会自动生成唯一 `Idempotency-Key`，避免同一次点击重复创建任务。网络超时并不等于任务未创建，请先查询原任务，不要立即重复提交。
+创建成功后保存响应中的任务 ID，并轮询同一个任务：
+
+```bash
+curl "https://api.onetoken.love/api/v3/contents/generations/tasks/TASK_ID_RETURNED_BY_CREATE" \
+  -H "Authorization: Bearer YOUR_ONETOKEN_API_KEY"
+```
+
+`status` 为 `succeeded` 时，从 `content.video_url` 读取视频地址。`queued` 或 `running` 表示仍在处理；`failed` 或 `rejected` 表示任务已结束，应根据错误修正请求。
+
+网络超时并不等于任务未创建。请求内容没有变化时应复用原 `Idempotency-Key` 恢复原任务；修正参数后重新提交时必须换一个新键，避免与旧请求冲突。
+
+## 请求参数
+
+| 参数                | 类型与要求    | 可选值和说明                                                    |
+| ------------------- | ------------- | --------------------------------------------------------------- |
+| `model`             | string，必填  | 当前使用精确模型 ID `doubao-seedance-2-0-260128`                |
+| `content`           | array，必填   | 至少包含一个文本、图片或视频元素；推荐始终使用数组              |
+| `resolution`        | string，可选  | `480p`、`720p`、`1080p`，默认 `720p`                            |
+| `ratio`             | string，可选  | `16:9`、`9:16`、`1:1`、`4:3`、`3:4`、`21:9`、`auto`、`adaptive` |
+| `duration`          | integer，可选 | 4-15 秒，默认 5；不接受 `-1`                                    |
+| `fps`               | integer，可选 | 当前只支持 `24`，默认 24                                        |
+| `generate_audio`    | boolean，可选 | 是否生成音频，默认 `true`                                       |
+| `watermark`         | boolean，可选 | 是否添加水印                                                    |
+| `return_last_frame` | boolean，可选 | 是否在成功结果中返回最后一帧地址，默认 `false`                  |
+
+`generate_audio`、`watermark` 和 `return_last_frame` 都是请求体顶层参数，不要放入 `content`。
+
+## 多模态素材格式
+
+```json
+{
+  "model": "doubao-seedance-2-0-260128",
+  "content": [
+    {
+      "type": "image_url",
+      "role": "reference_image",
+      "image_url": { "url": "https://example.com/character.png" }
+    },
+    {
+      "type": "video_url",
+      "role": "reference_video",
+      "video_url": { "url": "https://example.com/motion.mp4" }
+    },
+    {
+      "type": "audio_url",
+      "role": "reference_audio",
+      "audio_url": { "url": "https://example.com/music.mp3" }
+    },
+    {
+      "type": "text",
+      "text": "保持人物和运镜风格，生成一个连续的新镜头"
+    }
+  ],
+  "resolution": "720p",
+  "ratio": "16:9",
+  "duration": 5,
+  "fps": 24,
+  "generate_audio": true,
+  "watermark": false,
+  "return_last_frame": true
+}
+```
+
+参考素材应使用无需登录即可访问的 HTTPS URL。需要首尾帧时，图片元素的 `role` 分别使用 `first_frame` 和 `last_frame`。
 
 ## 常见问题
 
@@ -61,6 +150,10 @@ OneToken API Key 无效、已撤销或复制时带入了空格。请在控制台
 
 OneToken 账户可用额度不足。充值后重新创建任务，原失败任务不会自动续跑。
 
+### HTTP 409
+
+同一个 `Idempotency-Key` 对应了不同请求内容。原样恢复任务时复用原键；修改过参数后使用新键。
+
 ### HTTP 422
 
 模型名、时长、分辨率或参考素材不符合要求。先使用 `5 秒 + 720p + 纯文本` 验证，再逐步增加参考素材。
@@ -68,3 +161,5 @@ OneToken 账户可用额度不足。充值后重新创建任务，原失败任�
 ### 一直生成中
 
 视频通常需要数分钟。客户端会持续查询 15 分钟；超过时间后，请保留任务 ID 并在 OneToken 控制台检查，不要反复点击生成。
+
+更完整的认证、错误码和密钥管理说明见 [OneToken API 文档](https://app.onetoken.love/docs#video)。

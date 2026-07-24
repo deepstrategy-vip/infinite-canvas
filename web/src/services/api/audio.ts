@@ -87,7 +87,7 @@ function assertAudioConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置音频模型");
     if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
     if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
-    if (config.apiFormat === "gemini") throw new Error("Gemini 调用格式暂不支持音频生成，请使用 OpenAI 格式渠道");
+    if (config.apiFormat === "gemini") throw new Error("当前 OneToken Gemini 原生格式暂不支持该音频调用，请改用 OneToken OpenAI 兼容格式");
 }
 
 async function assertAudioBlob(blob: Blob) {

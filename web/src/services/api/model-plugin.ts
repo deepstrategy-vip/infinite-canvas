@@ -108,7 +108,7 @@ function createPoll(signal?: AbortSignal) {
 /**
  * Run a user-authored model call script as an async function body with flat locals (see PLUGIN_VARIABLES):
  *   prompt / images / videos / audios / messages / params        —— 本次请求的输入
- *   model / baseUrl / apiKey / systemPrompt     —— 当前渠道信息
+ *   model / baseUrl / apiKey / systemPrompt     —— 当前 OneToken 连接信息
  *   http / request / poll / sleep / signal / onDelta    —— 调用辅助
  * The script must `return` the result; each caller normalizes it to its capability's shape.
  */
@@ -169,13 +169,13 @@ export type PluginVariable = { name: string; type: string; desc: string; capabil
 export const PLUGIN_VARIABLES: PluginVariable[] = [
     { name: "prompt", type: "string", desc: "用户输入的提示词（已拼接系统提示词）", capabilities: ["image", "video", "audio"] },
     { name: "images", type: "string[]", desc: "参考图，dataURL 数组（改图 / 图生视频时有值）", capabilities: ["image", "video"] },
-    { name: "videos", type: "string[]", desc: "参考视频，公网 URL、asset:// URL 或 dataURL 数组", capabilities: ["video"] },
-    { name: "audios", type: "string[]", desc: "参考音频，公网 URL、asset:// URL 或 dataURL 数组", capabilities: ["video"] },
+    { name: "videos", type: "string[]", desc: "参考视频，公网 URL 或 dataURL 数组", capabilities: ["video"] },
+    { name: "audios", type: "string[]", desc: "参考音频，公网 URL 或 dataURL 数组", capabilities: ["video"] },
     { name: "messages", type: "{ role, content }[]", desc: "对话消息数组，含系统消息", capabilities: ["text"] },
     { name: "params", type: "object", desc: "生成参数：生图 {size,quality,count}、视频 {seconds,size,resolution,ratio,generateAudio,watermark}、音频 {voice,format,speed,instructions}" },
-    { name: "model", type: "string", desc: "模型名称（不含渠道前缀）" },
-    { name: "baseUrl", type: "string", desc: "渠道接口地址（原样，未拼 /v1）" },
-    { name: "apiKey", type: "string", desc: "渠道 API Key，请求头里自己带上" },
+    { name: "model", type: "string", desc: "OneToken 模型名称（不含连接前缀）" },
+    { name: "baseUrl", type: "string", desc: "OneToken 根地址，推荐 https://api.onetoken.love" },
+    { name: "apiKey", type: "string", desc: "OneToken API Key，请求头里自己带上" },
     { name: "systemPrompt", type: "string", desc: "系统提示词原文" },
     { name: "http", type: "object", desc: "便捷请求：http.post(path, body, {headers,params,responseType})、http.get(path, opts)、http.url(path)；默认带 Authorization: Bearer apiKey，可用 headers 覆盖；path 相对时按 baseUrl 拼 /v1" },
     { name: "request", type: "function", desc: "原始请求 request({ method, url, headers, params, data, responseType })，不加任何默认头，鉴权头自己写；url 相对时按 baseUrl 拼接（不加 /v1）" },
@@ -197,14 +197,15 @@ export type PluginTemplate = { label: string; script: string };
 export const PLUGIN_TEMPLATES: Record<ModelCapability, PluginTemplate[]> = {
     image: [
         {
-            label: "OpenAI 规范",
-            script: `// 生图 / 改图：两者接口不同，用 images 是否为空来区分。
+            label: "OneToken 生图",
+            script: `// OneToken 生图 / 改图：两者接口不同，用 images 是否为空来区分。
 // 可用：prompt、images(dataURL[])、params{size,quality,count}、model、baseUrl、apiKey
+const root = baseUrl.replace(/\\/+$/, "").replace(/\\/(?:v1beta|v1|api\\/v3)$/i, "");
 if (images.length === 0) {
   // 文生图：/images/generations（JSON）
   const data = await request({
     method: "post",
-    url: \`\${baseUrl}/v1/images/generations\`,
+    url: \`\${root}/v1/images/generations\`,
     headers: { "Content-Type": "application/json", Authorization: \`Bearer \${apiKey}\` },
     data: { model, prompt, n: params.count, size: params.size, response_format: "b64_json" },
   });
@@ -222,16 +223,17 @@ for (const dataUrl of images) {
 }
 const edited = await request({
   method: "post",
-  url: \`\${baseUrl}/v1/images/edits\`,
+  url: \`\${root}/v1/images/edits\`,
   headers: { Authorization: \`Bearer \${apiKey}\` }, // 不要手动设 Content-Type，交给浏览器带 boundary
   data: form,
 });
 return (edited.data || []).map((item) => item.b64_json ? \`data:image/png;base64,\${item.b64_json}\` : item.url);`,
         },
         {
-            label: "Gemini 规范",
-            script: `// Gemini 文生图 / 图生图：都走 generateContent，参考图放进 parts 的 inline_data。
+            label: "OneToken Gemini 生图",
+            script: `// OneToken Gemini 原生生图 / 图生图：都走 generateContent。
 // 可用：prompt、images(dataURL[])、model、baseUrl、apiKey
+const root = baseUrl.replace(/\\/+$/, "").replace(/\\/(?:v1beta|v1|api\\/v3)$/i, "");
 const parts = [{ text: prompt }];
 for (const dataUrl of images) {
   const match = dataUrl.match(/^data:([^;]+);base64,(.*)$/);
@@ -239,7 +241,7 @@ for (const dataUrl of images) {
 }
 const data = await request({
   method: "post",
-  url: \`\${baseUrl}/v1beta/models/\${model}:generateContent\`,
+  url: \`\${root}/v1beta/models/\${model}:generateContent\`,
   headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
   data: { contents: [{ role: "user", parts }], generationConfig: { responseModalities: ["IMAGE"] } },
 });
@@ -254,11 +256,11 @@ return (data.candidates || [])
         {
             label: "OneToken Seedance 2.0",
             script: `// OneToken Seedance 2.0：支持文本、图片、视频和音频参考。
-// Base URL 固定使用：https://api.onetoken.love/api/v3
+// Base URL 推荐使用：https://api.onetoken.love；脚本会固定调用 /api/v3。
 // 可用：prompt、images(dataURL[])、videos(URL/dataURL[])、audios(URL/dataURL[])、
 // params{seconds,resolution,ratio,generateAudio,watermark}、model、baseUrl、apiKey
-const root = baseUrl.replace(/\\/+$/, "");
-const endpoint = /\\/contents\\/generations\\/tasks$/i.test(root) ? root : \`\${root}/contents/generations/tasks\`;
+const root = baseUrl.replace(/\\/+$/, "").replace(/\\/(?:v1beta|v1|api\\/v3)$/i, "");
+const endpoint = \`\${root}/api/v3/contents/generations/tasks\`;
 const requestId = globalThis.crypto?.randomUUID?.() || \`canvas-\${Date.now()}-\${Math.random().toString(16).slice(2)}\`;
 const headers = {
   "Content-Type": "application/json",
@@ -322,41 +324,44 @@ return await poll(
 );`,
         },
         {
-            label: "OpenAI 规范",
-            script: `// 视频（脚本内部自行轮询）。可用：prompt、images(dataURL[])、params{seconds,size,resolution,ratio}
+            label: "OneToken 视频",
+            script: `// OneToken OpenAI 兼容视频（脚本内部自行轮询）。
+// 可用：prompt、images(dataURL[])、params{seconds,size,resolution,ratio}
+const root = baseUrl.replace(/\\/+$/, "").replace(/\\/(?:v1beta|v1|api\\/v3)$/i, "");
 const headers = { "Content-Type": "application/json", Authorization: \`Bearer \${apiKey}\` };
 const task = await request({
   method: "post",
-  url: \`\${baseUrl}/v1/videos\`,
+  url: \`\${root}/v1/videos\`,
   headers,
   data: { model, prompt, seconds: params.seconds },
 });
 return await poll(
-  () => request({ method: "get", url: \`\${baseUrl}/v1/videos/\${task.id}\`, headers }),
+  () => request({ method: "get", url: \`\${root}/v1/videos/\${task.id}\`, headers }),
   (state) => state.status === "completed" ? { url: state.video_url || state.url } : null,
   { intervalMs: 2500, timeoutMs: 300000 },
 );`,
         },
         {
-            label: "Gemini 规范",
-            script: `// Gemini(Veo) 视频：predictLongRunning 提交，轮询 operation 拿视频 URI。
+            label: "OneToken Gemini 视频",
+            script: `// OneToken Gemini 原生视频：predictLongRunning 提交，轮询 operation 拿视频 URI。
 // 可用：prompt、images(dataURL[])、params、model、baseUrl、apiKey
+const root = baseUrl.replace(/\\/+$/, "").replace(/\\/(?:v1beta|v1|api\\/v3)$/i, "");
 const headers = { "Content-Type": "application/json", "x-goog-api-key": apiKey };
 const instance = { prompt };
 const first = images[0] && images[0].match(/^data:([^;]+);base64,(.*)$/);
 if (first) instance.image = { bytesBase64Encoded: first[2], mimeType: first[1] };
 const op = await request({
   method: "post",
-  url: \`\${baseUrl}/v1beta/models/\${model}:predictLongRunning\`,
+  url: \`\${root}/v1beta/models/\${model}:predictLongRunning\`,
   headers,
   data: { instances: [instance], parameters: { aspectRatio: params.ratio } },
 });
 return await poll(
-  () => request({ method: "get", url: \`\${baseUrl}/v1beta/\${op.name}\`, headers }),
+  () => request({ method: "get", url: \`\${root}/v1beta/\${op.name}\`, headers }),
   (state) => {
     if (!state.done) return null;
     const uri = state.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
-    if (!uri) throw new Error("Gemini 未返回视频 URI");
+    if (!uri) throw new Error("OneToken 没有返回视频 URI");
     return { url: uri.includes("key=") ? uri : \`\${uri}\${uri.includes("?") ? "&" : "?"}key=\${apiKey}\` };
   },
   { intervalMs: 5000, timeoutMs: 300000 },
@@ -365,23 +370,25 @@ return await poll(
     ],
     audio: [
         {
-            label: "OpenAI 规范",
-            script: `// 音频 TTS。可用：prompt、params{voice,format,speed,instructions}、model
+            label: "OneToken 音频",
+            script: `// OneToken 音频 TTS。可用：prompt、params{voice,format,speed,instructions}、model
+const root = baseUrl.replace(/\\/+$/, "").replace(/\\/(?:v1beta|v1|api\\/v3)$/i, "");
 return await request({
   method: "post",
-  url: \`\${baseUrl}/v1/audio/speech\`,
+  url: \`\${root}/v1/audio/speech\`,
   headers: { "Content-Type": "application/json", Authorization: \`Bearer \${apiKey}\` },
   responseType: "blob",
   data: { model, input: prompt, voice: params.voice, response_format: params.format, speed: Number(params.speed) },
 });`,
         },
         {
-            label: "Gemini 规范",
-            script: `// Gemini TTS：generateContent + AUDIO 模态，返回 base64 PCM（音频数据在 inlineData.data）。
+            label: "OneToken Gemini 音频",
+            script: `// OneToken Gemini 原生 TTS：generateContent + AUDIO 模态。
 // 可用：prompt、params{voice}、model、baseUrl、apiKey
+const root = baseUrl.replace(/\\/+$/, "").replace(/\\/(?:v1beta|v1|api\\/v3)$/i, "");
 const data = await request({
   method: "post",
-  url: \`\${baseUrl}/v1beta/models/\${model}:generateContent\`,
+  url: \`\${root}/v1beta/models/\${model}:generateContent\`,
   headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
   data: {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -392,17 +399,18 @@ const data = await request({
   },
 });
 const audio = data.candidates?.[0]?.content?.parts?.map((p) => p.inlineData || p.inline_data).find(Boolean);
-if (!audio?.data) throw new Error("Gemini 未返回音频");
+if (!audio?.data) throw new Error("OneToken 没有返回音频");
 return { data: audio.data };`,
         },
     ],
     text: [
         {
-            label: "OpenAI 规范",
-            script: `// 文本对话（OpenAI Responses 接口）。可用：messages([{role,content}])、systemPrompt、model
+            label: "OneToken 文本",
+            script: `// OneToken 文本对话（Responses 接口）。可用：messages([{role,content}])、systemPrompt、model
+const root = baseUrl.replace(/\\/+$/, "").replace(/\\/(?:v1beta|v1|api\\/v3)$/i, "");
 const data = await request({
   method: "post",
-  url: \`\${baseUrl}/v1/responses\`,
+  url: \`\${root}/v1/responses\`,
   headers: { "Content-Type": "application/json", Authorization: \`Bearer \${apiKey}\` },
   data: { model, input: messages },
 });
@@ -413,15 +421,16 @@ onDelta(text);
 return text;`,
         },
         {
-            label: "Gemini 规范",
-            script: `// Gemini 文本：generateContent，system 消息放 systemInstruction。
+            label: "OneToken Gemini 文本",
+            script: `// OneToken Gemini 原生文本：generateContent，system 消息放 systemInstruction。
 // 可用：messages([{role,content}])、systemPrompt、model、baseUrl、apiKey
+const root = baseUrl.replace(/\\/+$/, "").replace(/\\/(?:v1beta|v1|api\\/v3)$/i, "");
 const contents = messages
   .filter((m) => m.role !== "system")
   .map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
 const data = await request({
   method: "post",
-  url: \`\${baseUrl}/v1beta/models/\${model}:generateContent\`,
+  url: \`\${root}/v1beta/models/\${model}:generateContent\`,
   headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
   data: { contents, ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}) },
 });
