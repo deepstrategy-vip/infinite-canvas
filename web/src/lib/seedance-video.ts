@@ -58,7 +58,7 @@ const seedancePixels = {
 
 export function isSeedanceVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "videoModel" | "baseUrl">) {
     const requestConfig = "channels" in config ? resolveModelRequestConfig(config, config.model || config.videoModel) : config;
-    return isSeedanceVideoModel(modelOptionName(requestConfig.model || requestConfig.videoModel)) || isArkPlanBaseUrl(requestConfig.baseUrl);
+    return isSeedanceVideoModel(modelOptionName(requestConfig.model || requestConfig.videoModel));
 }
 
 export function isSeedanceVideoModel(model: string) {
@@ -69,10 +69,6 @@ export function isSeedanceVideoModel(model: string) {
 export function isSeedanceFastModel(model: string) {
     const value = model.toLowerCase();
     return isSeedanceVideoModel(value) && value.includes("fast");
-}
-
-export function isArkPlanBaseUrl(baseUrl: string) {
-    return baseUrl.toLowerCase().includes("ark.cn-beijing.volces.com/api/plan/v3") || baseUrl.toLowerCase().includes("/api/plan/v3");
 }
 
 export function normalizeSeedanceResolution(value: string, model = "") {
@@ -134,11 +130,7 @@ export function seedanceReferenceLabel(kind: "image" | "video" | "audio", index:
 }
 
 export function buildSeedancePromptText(prompt: string, images: ReferenceImage[], videos: ReferenceVideo[], audios: ReferenceAudio[]) {
-    const labels = [
-        ...images.map((_, index) => seedanceReferenceLabel("image", index)),
-        ...videos.map((_, index) => seedanceReferenceLabel("video", index)),
-        ...audios.map((_, index) => seedanceReferenceLabel("audio", index)),
-    ];
+    const labels = [...images.map((_, index) => seedanceReferenceLabel("image", index)), ...videos.map((_, index) => seedanceReferenceLabel("video", index)), ...audios.map((_, index) => seedanceReferenceLabel("audio", index))];
     const text = prompt.trim();
     if (!labels.length) return text;
     return `参考资产编号：${labels.join("、")}。请按这些编号理解提示词中的图片、视频和音频引用。\n\n${text}`;
@@ -166,4 +158,4 @@ export function seedanceVideoReferenceError(videos: ReferenceVideo[]) {
     return "";
 }
 
-export const seedanceVideoReferenceHint = "参考视频需为 mp4/mov，H.264/H.265，FPS 24-60；含真人人脸资产请使用火山授权 asset:// 资产。";
+export const seedanceVideoReferenceHint = "参考视频需为 mp4/mov、H.264/H.265、FPS 24-60，并使用公网可访问 URL 或本地已保存素材。";

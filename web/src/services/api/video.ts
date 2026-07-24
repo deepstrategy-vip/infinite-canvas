@@ -66,7 +66,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
         return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
     if (videoReferences.length || audioReferences.length) {
-        throw new Error("当前视频接口不支持参考视频或参考音频，请切换到 Seedance 2.0 / 火山 Agent Plan 模型，或移除参考资产");
+        throw new Error("当前 OneToken 视频模型不支持参考视频或参考音频，请切换到 Seedance 2.0，或移除参考素材");
     }
     return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
 }
@@ -252,7 +252,7 @@ function assertSeedanceAudioReferences(audioReferences: ReferenceAudio[]) {
 }
 
 function seedanceApiUrl(config: AiConfig, taskId?: string) {
-    return buildApiUrl(config.baseUrl, `/contents/generations/tasks${taskId ? `/${encodeURIComponent(taskId)}` : ""}`);
+    return buildApiUrl(config.baseUrl, `/api/v3/contents/generations/tasks${taskId ? `/${encodeURIComponent(taskId)}` : ""}`);
 }
 
 async function buildSeedanceContent(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {
@@ -273,27 +273,27 @@ async function buildSeedanceContent(config: AiConfig, prompt: string, references
 
 async function resolveSeedanceImageUrl(config: AiConfig, image: ReferenceImage) {
     const directUrl = image.url || image.dataUrl;
-    if (isPublicMediaUrl(directUrl) || directUrl.startsWith("asset://")) return directUrl;
+    if (isPublicMediaUrl(directUrl)) return directUrl;
     const dataUrl = await imageToDataUrl(image);
     if (!dataUrl) throw new Error("参考图读取失败，请换一张图片或重新上传");
     return dataUrl;
 }
 
 async function resolveSeedanceVideoUrl(video: ReferenceVideo) {
-    if (isPublicMediaUrl(video.url) || video.url.startsWith("asset://")) return video.url;
+    if (isPublicMediaUrl(video.url)) return video.url;
     let blob: Blob | null = null;
     if (video.storageKey) blob = await getMediaBlob(video.storageKey);
     if (!blob && video.url?.startsWith("blob:")) blob = await (await fetch(video.url)).blob();
-    if (!blob) throw new Error("参考视频必须是公网 URL、资产 ID，或本地已保存的视频");
+    if (!blob) throw new Error("参考视频必须是公网 URL 或本地已保存的视频");
     return blobToDataUrl(blob);
 }
 
 async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {
-    if (isPublicMediaUrl(audio.url) || audio.url.startsWith("asset://")) return audio.url;
+    if (isPublicMediaUrl(audio.url)) return audio.url;
     let blob: Blob | null = null;
     if (audio.storageKey) blob = await getMediaBlob(audio.storageKey);
     if (!blob && audio.url?.startsWith("blob:")) blob = await (await fetch(audio.url)).blob();
-    if (!blob) throw new Error("参考音频必须是公网 URL、资产 ID，或本地已保存的音频");
+    if (!blob) throw new Error("参考音频必须是公网 URL 或本地已保存的音频");
     return blobToDataUrl(blob);
 }
 
@@ -312,7 +312,7 @@ function assertVideoConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置视频模型");
     if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
     if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
-    if (config.apiFormat === "gemini") throw new Error("Gemini 调用格式暂不支持视频生成，请使用 OpenAI 格式渠道");
+    if (config.apiFormat === "gemini") throw new Error("当前 OneToken Gemini 原生格式暂不支持该视频调用，请改用 OneToken OpenAI 兼容格式");
 }
 
 function normalizeVideoSeconds(value: string) {

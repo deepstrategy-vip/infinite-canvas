@@ -3,10 +3,10 @@ import axios, { type AxiosRequestConfig } from "axios";
 
 import { PLUGIN_TEMPLATES } from "../src/services/api/model-plugin";
 import { createVideoGenerationTask } from "../src/services/api/video";
-import { defaultConfig, encodeChannelModel } from "../src/stores/use-config-store";
+import { buildApiUrl, defaultConfig, encodeChannelModel } from "../src/stores/use-config-store";
 
 const template = PLUGIN_TEMPLATES.video.find((item) => item.label === "OneToken Seedance 2.0");
-const requestSpies: Array<ReturnType<typeof spyOn>> = [];
+const requestSpies: Array<{ mockRestore(): void }> = [];
 
 afterEach(() => {
     requestSpies.splice(0).forEach((mock) => mock.mockRestore());
@@ -32,7 +32,7 @@ describe("OneToken Seedance 2.0 model script", () => {
                     {
                         id: "onetoken",
                         name: "OneToken",
-                        baseUrl: "https://api.onetoken.love/api/v3/",
+                        baseUrl: "https://api.onetoken.love/",
                         apiKey: "test-key",
                         apiFormat: "openai",
                         models: [{ name: model, capability: "video", script: template!.script }],
@@ -41,7 +41,7 @@ describe("OneToken Seedance 2.0 model script", () => {
                 models: [modelValue],
                 model: modelValue,
                 videoModel: modelValue,
-                baseUrl: "https://api.onetoken.love/api/v3/",
+                baseUrl: "https://api.onetoken.love/",
                 apiKey: "test-key",
                 videoSeconds: "-1",
                 vquality: "1080p",
@@ -99,5 +99,66 @@ describe("OneToken Seedance 2.0 model script", () => {
         };
 
         await expect(createVideoGenerationTask(config, "", [], [], [{ id: "audio-1", name: "audio.mp3", type: "audio/mpeg", url: "https://cdn.example.com/reference.mp3" }])).rejects.toThrow("参考音频不能单独使用");
+    });
+
+    test("keeps legacy versioned Base URLs compatible with the built-in Seedance path", async () => {
+        let postedUrl = "";
+        const postSpy = spyOn(axios, "post").mockImplementation(async (...args) => {
+            postedUrl = String(args[0]);
+            return { data: { id: "task-direct" } } as Awaited<ReturnType<typeof axios.post>>;
+        });
+        requestSpies.push(postSpy);
+
+        const model = "doubao-seedance-2-0-260128";
+        const modelValue = encodeChannelModel("onetoken", model);
+        const task = await createVideoGenerationTask(
+            {
+                ...defaultConfig,
+                channels: [
+                    {
+                        id: "onetoken",
+                        name: "OneToken",
+                        baseUrl: "https://api.onetoken.love/api/v3",
+                        apiKey: "test-key",
+                        apiFormat: "openai",
+                        models: [{ name: model, capability: "video" }],
+                    },
+                ],
+                models: [modelValue],
+                model: modelValue,
+                videoModel: modelValue,
+            },
+            "测试旧配置",
+        );
+
+        expect(task).toEqual({ id: "task-direct", provider: "seedance", model: modelValue });
+        expect(postedUrl).toBe("https://api.onetoken.love/api/v3/contents/generations/tasks");
+    });
+});
+
+describe("OneToken API boundary", () => {
+    test("selects an explicit API version for every generated path", () => {
+        const root = "https://api.onetoken.love";
+        expect(buildApiUrl(root, "/models")).toBe(`${root}/v1/models`);
+        expect(buildApiUrl(`${root}/api/v3`, "/models")).toBe(`${root}/v1/models`);
+        expect(buildApiUrl(`${root}/v1`, "/api/v3/contents/generations/tasks")).toBe(`${root}/api/v3/contents/generations/tasks`);
+        expect(buildApiUrl(`${root}/api/v3`, "/v1beta/models/gemini:generateContent")).toBe(`${root}/v1beta/models/gemini:generateContent`);
+    });
+
+    test("keeps every public template under the OneToken product boundary", () => {
+        const templates = Object.values(PLUGIN_TEMPLATES).flat();
+        expect(templates.every((item) => item.label.startsWith("OneToken"))).toBe(true);
+
+        const scripts = templates.map((item) => item.script).join("\n");
+        const absoluteUrls = scripts.match(/https?:\/\/[^\s"'`；]+/g) || [];
+        expect(absoluteUrls.every((url) => url.startsWith("https://api.onetoken.love"))).toBe(true);
+        expect(scripts).not.toContain("asset:" + "//");
+        expect(scripts).not.toContain("/api/plan/" + "v3");
+    });
+
+    test("sends the built-in documentation entry to the OneToken guide", async () => {
+        const envSource = await Bun.file(new URL("../src/constant/env.ts", import.meta.url)).text();
+        expect(envSource).toContain("https://onetoken.love/docs#infinite-canvas");
+        expect(envSource).not.toContain("docs.canvas.best");
     });
 });

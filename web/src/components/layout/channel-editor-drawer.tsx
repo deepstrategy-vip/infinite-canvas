@@ -7,8 +7,8 @@ import { ModelScriptEditor } from "./model-script-editor";
 import { ModelSelectModal } from "./model-select-modal";
 
 const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
-    { label: "OpenAI", value: "openai" },
-    { label: "Gemini", value: "gemini" },
+    { label: "OneToken OpenAI 兼容", value: "openai" },
+    { label: "OneToken Gemini 原生", value: "gemini" },
 ];
 
 const capabilityOptions: Array<{ label: string; value: ModelCapability }> = [
@@ -49,7 +49,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     const removeModel = (name: string) => setModels(draft.models.filter((model) => model.name !== name));
 
     const save = () => {
-        onSave({ ...draft, name: draft.name.trim() || "未命名渠道", models: normalizeChannelModels(draft.models) });
+        onSave({ ...draft, name: draft.name.trim() || "OneToken", models: normalizeChannelModels(draft.models) });
         onClose();
     };
 
@@ -57,7 +57,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
         <Drawer
             open={open}
             width={640}
-            title="编辑渠道"
+            title="编辑 OneToken 连接"
             onClose={onClose}
             styles={{ body: { paddingTop: 16 } }}
             extra={
@@ -71,27 +71,27 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
         >
             <div className="grid gap-4 md:grid-cols-2">
                 <label className="block">
-                    <span className="mb-1 block text-sm font-medium">渠道名称</span>
+                    <span className="mb-1 block text-sm font-medium">连接名称</span>
                     <Input value={draft.name} onChange={(event) => patch({ name: event.target.value })} />
                 </label>
                 <label className="block">
-                    <span className="mb-1 block text-sm font-medium">协议</span>
+                    <span className="mb-1 block text-sm font-medium">OneToken 调用格式</span>
                     <Select className="w-full" value={draft.apiFormat} options={apiFormatOptions} onChange={changeApiFormat} />
                 </label>
                 <label className="block md:col-span-2">
-                    <span className="mb-1 block text-sm font-medium">接口地址</span>
-                    <Input value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} placeholder="https://api.example.com" />
+                    <span className="mb-1 block text-sm font-medium">OneToken Base URL</span>
+                    <Input value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} placeholder="https://api.onetoken.love" />
                 </label>
                 <label className="block md:col-span-2">
-                    <span className="mb-1 block text-sm font-medium">API Key</span>
+                    <span className="mb-1 block text-sm font-medium">OneToken API Key</span>
                     <Input.Password value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} placeholder="sk-..." />
                 </label>
             </div>
 
             <div className="mt-6 mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
-                    <div className="text-sm font-semibold">渠道模型</div>
-                    <div className="mt-0.5 text-xs text-stone-500">已选 {draft.models.length} 个；为每个模型指定能力并可自定义调用脚本。</div>
+                    <div className="text-sm font-semibold">OneToken 模型</div>
+                    <div className="mt-0.5 text-xs text-stone-500">已选 {draft.models.length} 个；为每个模型指定能力并可使用 OneToken 调用模板。</div>
                 </div>
                 <Button type="primary" icon={<ListPlus className="size-4" />} onClick={() => setSelectOpen(true)}>
                     选择模型
