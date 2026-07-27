@@ -18,6 +18,9 @@ describe("OneToken Seedance 2.0 model script", () => {
         const requests: AxiosRequestConfig[] = [];
         const requestSpy = spyOn(axios, "request").mockImplementation(async (config) => {
             requests.push(config);
+            if (String(config.url).endsWith("/api/v3/assets")) {
+                return { data: { id: "asset-1", url: "https://api.onetoken.love/api/v3/assets/asset-1", mime_type: "image/png", size: 5 } };
+            }
             if (config.method === "post") return { data: { id: "task-1" } };
             return { data: { status: "succeeded", content: { video_url: "https://cdn.example.com/output.mp4" } } };
         });
@@ -55,17 +58,24 @@ describe("OneToken Seedance 2.0 model script", () => {
         );
 
         expect(task.provider).toBe("plugin");
-        expect(requests.map((request) => request.url)).toEqual(["https://api.onetoken.love/api/v3/contents/generations/tasks", "https://api.onetoken.love/api/v3/contents/generations/tasks/task-1"]);
-        expect(requests[0].headers).toMatchObject({
+        expect(requests.map((request) => request.url)).toEqual([
+            "https://api.onetoken.love/api/v3/assets",
+            "https://api.onetoken.love/api/v3/contents/generations/tasks",
+            "https://api.onetoken.love/api/v3/contents/generations/tasks/task-1",
+        ]);
+        // The local picture is uploaded first, and only its returned address travels on.
+        expect(requests[0].headers).toMatchObject({ Authorization: "Bearer test-key" });
+        expect(requests[0].data).toBeInstanceOf(FormData);
+        expect(requests[1].headers).toMatchObject({
             Authorization: "Bearer test-key",
             "Content-Type": "application/json",
         });
-        expect(requests[0].headers?.["Idempotency-Key"]).toBeString();
-        expect(requests[0].data).toEqual({
+        expect(requests[1].headers?.["Idempotency-Key"]).toBeString();
+        expect(requests[1].data).toEqual({
             model,
             content: [
                 { type: "text", text: "按参考素材生成视频" },
-                { type: "image_url", role: "reference_image", image_url: { url: "data:image/png;base64,aW1hZ2U=" } },
+                { type: "image_url", role: "reference_image", image_url: { url: "https://api.onetoken.love/api/v3/assets/asset-1" } },
                 { type: "video_url", role: "reference_video", video_url: { url: "https://cdn.example.com/reference.mp4" } },
                 { type: "audio_url", role: "reference_audio", audio_url: { url: "https://cdn.example.com/reference.mp3" } },
             ],
@@ -160,5 +170,96 @@ describe("OneToken API boundary", () => {
         const envSource = await Bun.file(new URL("../src/constant/env.ts", import.meta.url)).text();
         expect(envSource).toContain("https://onetoken.love/docs#infinite-canvas");
         expect(envSource).not.toContain("docs.canvas.best");
+    });
+});
+
+describe("local material uploads", () => {
+    const model = "doubao-seedance-2-0-260128";
+    const modelValue = encodeChannelModel("onetoken", model);
+
+    function seedanceConfig(script?: string) {
+        return {
+            ...defaultConfig,
+            channels: [
+                {
+                    id: "onetoken",
+                    name: "OneToken",
+                    baseUrl: "https://api.onetoken.love/",
+                    apiKey: "test-key",
+                    apiFormat: "openai" as const,
+                    models: [{ name: model, capability: "video" as const, ...(script ? { script } : {}) }],
+                },
+            ],
+            models: [modelValue],
+            model: modelValue,
+            videoModel: modelValue,
+            baseUrl: "https://api.onetoken.love/",
+            apiKey: "test-key",
+        };
+    }
+
+    function spyRequests() {
+        const requests: AxiosRequestConfig[] = [];
+        let uploads = 0;
+        const spy = spyOn(axios, "request").mockImplementation(async (config) => {
+            requests.push(config);
+            if (String(config.url).endsWith("/api/v3/assets")) {
+                uploads += 1;
+                return { data: { id: `asset-${uploads}`, url: `https://api.onetoken.love/api/v3/assets/asset-${uploads}`, mime_type: "image/png", size: 5 } };
+            }
+            if (config.method === "post") return { data: { id: "task-1" } };
+            return { data: { status: "succeeded", content: { video_url: "https://cdn.example.com/output.mp4" } } };
+        });
+        requestSpies.push(spy);
+        return {
+            requests,
+            uploadCount: () => uploads,
+        };
+    }
+
+    // The whole point of the change: a provider fetches material itself, so a
+    // task carrying inlined bytes is refused before it ever starts.
+    test("never puts base64 material in the task request", async () => {
+        const { requests } = spyRequests();
+
+        await createVideoGenerationTask(
+            seedanceConfig(template!.script),
+            "生成视频",
+            [{ id: "image-1", name: "image.png", type: "image/png", dataUrl: "data:image/png;base64,aW1hZ2U=" }],
+            [],
+            [],
+        );
+
+        const taskRequest = requests.find((request) => String(request.url).endsWith("/contents/generations/tasks"));
+        expect(JSON.stringify(taskRequest?.data)).not.toContain("base64");
+        expect(JSON.stringify(taskRequest?.data)).not.toContain("data:image");
+    });
+
+    // A canvas commonly wires one picture into several slots; paying for the
+    // same upload repeatedly would slow every generation down for nothing.
+    test("uploads one picture once even when it is referenced twice", async () => {
+        const { uploadCount } = spyRequests();
+        const image = { id: "image-1", name: "image.png", type: "image/png", storageKey: "image:same", dataUrl: "data:image/png;base64,aW1hZ2U=" };
+
+        await createVideoGenerationTask(seedanceConfig(template!.script), "生成视频", [image, { ...image, id: "image-2" }], [], []);
+
+        expect(uploadCount()).toBe(1);
+    });
+
+    // Material already on a public address needs no copy of ours.
+    test("leaves public material untouched", async () => {
+        const { requests, uploadCount } = spyRequests();
+
+        await createVideoGenerationTask(
+            seedanceConfig(template!.script),
+            "生成视频",
+            [{ id: "image-1", name: "image.png", type: "image/png", url: "https://cdn.example.com/reference.png", dataUrl: "" }],
+            [{ id: "video-1", name: "video.mp4", type: "video/mp4", url: "https://cdn.example.com/reference.mp4" }],
+            [],
+        );
+
+        expect(uploadCount()).toBe(0);
+        const taskRequest = requests.find((request) => String(request.url).endsWith("/contents/generations/tasks"));
+        expect(JSON.stringify(taskRequest?.data)).toContain("https://cdn.example.com/reference.png");
     });
 });
