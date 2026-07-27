@@ -3,7 +3,8 @@ import { nanoid } from "nanoid";
 
 import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { imageToDataUrl } from "@/services/image-storage";
+import { getImageBlob, imageToDataUrl } from "@/services/image-storage";
+import { createAssetUploader } from "./assets";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
@@ -101,9 +102,14 @@ async function createPluginVideoTask(
         assertSeedanceVideoReferences(videoReferences);
         assertSeedanceAudioReferences(audioReferences);
     }
-    const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
-    const videoRefs = await Promise.all(videoReferences.map((video) => resolveSeedanceVideoUrl(video)));
-    const audioRefs = await Promise.all(audioReferences.map((audio) => resolveSeedanceAudioUrl(audio)));
+    // Seedance is fetched by the provider, so its material must be a public URL.
+    // Other video scripts still receive data URLs, which is what they parse.
+    const upload = createAssetUploader(config, options);
+    const refs = seedance
+        ? await Promise.all(references.map((image) => resolveSeedanceImageUrl(image, upload)))
+        : await Promise.all(references.map((image) => imageToDataUrl(image)));
+    const videoRefs = await Promise.all(videoReferences.map((video) => resolveSeedanceVideoUrl(video, upload)));
+    const audioRefs = await Promise.all(audioReferences.map((audio) => resolveSeedanceAudioUrl(audio, upload)));
     const result = videoPluginResult(
         await runModelPlugin({
             capability: "video",
@@ -195,7 +201,7 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
     }
     assertSeedanceVideoReferences(videoReferences);
     assertSeedanceAudioReferences(audioReferences);
-    const content = await buildSeedanceContent(config, prompt, references, videoReferences, audioReferences);
+    const content = await buildSeedanceContent(config, prompt, references, videoReferences, audioReferences, options);
     if (!content.length) throw new Error("请输入视频提示词，或连接参考图片/视频/音频");
     const payload = {
         model: modelOptionName(model),
@@ -255,46 +261,76 @@ function seedanceApiUrl(config: AiConfig, taskId?: string) {
     return buildApiUrl(config.baseUrl, `/api/v3/contents/generations/tasks${taskId ? `/${encodeURIComponent(taskId)}` : ""}`);
 }
 
-async function buildSeedanceContent(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {
+async function buildSeedanceContent(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions) {
     const content: Array<Record<string, unknown>> = [];
+    const upload = createAssetUploader(config, options);
     const text = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
     if (text) content.push({ type: "text", text });
     for (const image of references.slice(0, SEEDANCE_REFERENCE_LIMITS.images)) {
-        content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, image) }, role: "reference_image" });
+        content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(image, upload) }, role: "reference_image" });
     }
     for (const video of videoReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.videos)) {
-        content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(video) }, role: "reference_video" });
+        content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(video, upload) }, role: "reference_video" });
     }
     for (const audio of audioReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.audios)) {
-        content.push({ type: "audio_url", audio_url: { url: await resolveSeedanceAudioUrl(audio) }, role: "reference_audio" });
+        content.push({ type: "audio_url", audio_url: { url: await resolveSeedanceAudioUrl(audio, upload) }, role: "reference_audio" });
     }
     return content;
 }
 
-async function resolveSeedanceImageUrl(config: AiConfig, image: ReferenceImage) {
-    const directUrl = image.url || image.dataUrl;
-    if (isPublicMediaUrl(directUrl)) return directUrl;
+/**
+ * A video provider fetches reference material itself, so every reference has to
+ * end up as a public URL. Canvas material is a Blob in IndexedDB, and inlining
+ * it as a data URL is refused by the video endpoint and would exceed the
+ * request-body limit anyway, so local material is uploaded first.
+ */
+type AssetUploader = ReturnType<typeof createAssetUploader>;
+
+async function readReferenceImageBlob(image: ReferenceImage) {
+    if (image.storageKey) {
+        // Local storage can be unavailable — private browsing, a full quota, a
+        // cleared database — and the picture is usually still in hand, so a
+        // failure here falls through rather than ending the generation.
+        try {
+            const stored = await getImageBlob(image.storageKey);
+            if (stored) return stored;
+        } catch {
+            // fall through to the inline sources below
+        }
+    }
+    const source = image.url || image.dataUrl;
+    if (source && (source.startsWith("blob:") || source.startsWith("data:"))) {
+        return (await fetch(source)).blob();
+    }
     const dataUrl = await imageToDataUrl(image);
-    if (!dataUrl) throw new Error("参考图读取失败，请换一张图片或重新上传");
-    return dataUrl;
+    if (!dataUrl) return null;
+    return (await fetch(dataUrl)).blob();
 }
 
-async function resolveSeedanceVideoUrl(video: ReferenceVideo) {
+async function resolveSeedanceImageUrl(image: ReferenceImage, upload: AssetUploader) {
+    const directUrl = image.url || image.dataUrl;
+    if (isPublicMediaUrl(directUrl)) return directUrl;
+    const blob = await readReferenceImageBlob(image);
+    if (!blob) throw new Error("参考图读取失败，请换一张图片或重新上传");
+    return (await upload(blob, image.storageKey)).url;
+}
+
+async function resolveSeedanceVideoUrl(video: ReferenceVideo, upload: AssetUploader) {
     if (isPublicMediaUrl(video.url)) return video.url;
     let blob: Blob | null = null;
     if (video.storageKey) blob = await getMediaBlob(video.storageKey);
     if (!blob && video.url?.startsWith("blob:")) blob = await (await fetch(video.url)).blob();
     if (!blob) throw new Error("参考视频必须是公网 URL 或本地已保存的视频");
-    return blobToDataUrl(blob);
+    return (await upload(blob, video.storageKey)).url;
 }
 
-async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {
+async function resolveSeedanceAudioUrl(audio: ReferenceAudio, upload: AssetUploader) {
     if (isPublicMediaUrl(audio.url)) return audio.url;
     let blob: Blob | null = null;
     if (audio.storageKey) blob = await getMediaBlob(audio.storageKey);
     if (!blob && audio.url?.startsWith("blob:")) blob = await (await fetch(audio.url)).blob();
     if (!blob) throw new Error("参考音频必须是公网 URL 或本地已保存的音频");
-    return blobToDataUrl(blob);
+    return (await upload(blob, audio.storageKey)).url;
 }
 
 async function videoResultFromUrl(url: string, options?: RequestOptions): Promise<VideoGenerationResult> {
