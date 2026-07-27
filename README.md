@@ -40,6 +40,7 @@
 - Codex App 插件：提供 Codex app 插件，安装后会自动注册 MCP 并尝试拉起本地 Agent。
 - 插件系统：支持通过 URL 动态安装 / 启用 / 更新 / 卸载远程节点插件，并提供 TypeScript SDK 自行开发画布节点插件。
 - OneToken Seedance：内置统一调用脚本，支持文生视频、参考图、参考视频、参考音频、生成参数和异步结果回填。
+- 本地素材直接可用：拖入画布的图片、视频和音频在生成视频时自动上传为公网地址，无需自行准备对象存储或 CDN。
 - 提示词库：浏览器前端直连多个 GitHub 开源项目，并缓存到 IndexedDB。
 
 完整功能说明见 [功能介绍](docs/content/docs/overview/features.mdx)。
