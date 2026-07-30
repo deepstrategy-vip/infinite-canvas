@@ -43,18 +43,36 @@ function aiHeaders(config: AiConfig, contentType?: string) {
     };
 }
 
+/**
+ * How long to keep waiting for a finished video.
+ *
+ * Measured against production: 1080p/6s took 9.1 minutes and 1080p/10s took
+ * 12.0 minutes, so the previous 10-minute ceiling gave up while the job was
+ * still running. The task keeps going server-side and is billed either way, so
+ * a short budget only hides a video the user already paid for.
+ */
+const VIDEO_POLL_BUDGET_MS: Record<string, number> = {
+    seedance: 40 * 60 * 1000,
+};
+const DEFAULT_VIDEO_POLL_BUDGET_MS = 15 * 60 * 1000;
+
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
     const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
     const delayMs = task.provider === "seedance" ? 5000 : 2500;
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    const budgetMs = VIDEO_POLL_BUDGET_MS[task.provider] ?? DEFAULT_VIDEO_POLL_BUDGET_MS;
+    const deadline = Date.now() + budgetMs;
+    for (;;) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
         if (state.status === "completed") return state.result;
         if (state.status === "failed") throw new Error(state.error);
-        if (attempt === 119) throw new Error(`${task.provider === "seedance" ? "Seedance " : ""}视频生成超时，请稍后重试`);
+        if (Date.now() >= deadline) {
+            // The job is not cancelled by giving up here, so say so rather than
+            // implying the work was lost.
+            throw new Error(`${task.provider === "seedance" ? "Seedance " : ""}视频生成已超过 ${Math.round(budgetMs / 60000)} 分钟仍未完成。任务仍在服务端继续生成，稍后可重新查看，不需要重复提交。`);
+        }
         await delay(delayMs, options?.signal);
     }
-    throw new Error("视频生成超时，请稍后重试");
 }
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {
