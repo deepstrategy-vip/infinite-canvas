@@ -263,3 +263,28 @@ describe("local material uploads", () => {
         expect(JSON.stringify(taskRequest?.data)).toContain("https://cdn.example.com/reference.png");
     });
 });
+
+// A 1080p job was measured at 9–12 minutes in production, so a ceiling near ten
+// minutes reports a timeout for a video that is still being generated and has
+// already been billed.
+describe("Seedance 轮询预算", () => {
+    test("等待时间足以覆盖实测的 1080p 生成耗时", async () => {
+        const source = await Bun.file(new URL("../src/services/api/video.ts", import.meta.url)).text();
+
+        const budget = source.match(/seedance:\s*(\d+)\s*\*\s*60\s*\*\s*1000/);
+        expect(budget).not.toBeNull();
+        const minutes = Number(budget![1]);
+        // 实测 1080p/10s = 12.0 分钟；15 秒输出更久，留足余量。
+        expect(minutes).toBeGreaterThanOrEqual(30);
+
+        // 旧实现用固定次数表达时长，改动间隔就会静默缩短等待。
+        expect(source).not.toContain("attempt < 120");
+    });
+
+    test("超时文案说明任务仍在继续，而不是暗示白跑一趟", async () => {
+        const source = await Bun.file(new URL("../src/services/api/video.ts", import.meta.url)).text();
+
+        expect(source).toContain("任务仍在服务端继续生成");
+        expect(source).not.toContain("视频生成超时，请稍后重试");
+    });
+});
